@@ -165,7 +165,7 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
         )))
 
 (defun gitsafe-auto-save-command ()
-  (interactive)
+  ;; (interactive)
   ;; 删除了一个文件老是告诉我 run-idle 错误,那个文件不存在.
   ;; 因为删除了文件,那个 buffer 没删除.
   (gitsafe-auto-save--command))
@@ -268,7 +268,6 @@ Works on whole buffer or text selection, respects `narrow-to-region'.
 
 URL `http://ergoemacs.org/emacs/elisp_compact_empty_lines.html'
 Version 2017-09-22"
-  (interactive)
   (let ($begin $end)
     (if (region-active-p)
         (setq $begin (region-beginning) $end (region-end))
@@ -313,11 +312,20 @@ Version 2017-09-22"
   (save-buffer))
 
 ;;; gitsafe-magit-stage-command
-(defvar gitsafe-magit-display-uncommit nil)
-(defvar gitsafe-magit-display-unstaged t)
+(defvar gitsafe-magit-display-uncommit nil
+  "magit 是否 popup 显示 uncommmit 的内容")
+
+(defvar gitsafe-magit-display-unstaged t
+  " magit 是否 popup 显示 unstaged 的内容")
+
+(defvar gitsafe-commit-buffer-file-buffer nil
+  "magit stage 命令作用的 buffer")
 
 (defun gitsafe-magit-stage--command ()
+  ;; 清理 buffer 并保存.
   (gitsafe-save-buffer)
+  ;; 设置变量
+  (setq gitsafe-commit-buffer-file-buffer (current-buffer))
   ;; 跟踪文件
   (unless (gitsafe-git-track-p)
          (when (y-or-n-p "this file is not tracking by magit ,[y]track this file?")
@@ -346,6 +354,7 @@ Version 2017-09-22"
   (unless (gitsafe-buffer-anything-modified-p)
          (message "this file commit completely.")))
 
+;;;###autoload
 (defun gitsafe-magit-stage-command ()
   "Save the current buffer if needed."
   (interactive)
@@ -373,7 +382,6 @@ Version 2017-09-22"
 ;;; gitsafe-after-find-file
 (defun gitsafe-after-find-file ()
   "find file hook run magiit-save-command"
-  (interactive)
   (run-with-timer
    1 nil (lambda () (interactive)
            (let ((magit-display-buffer-function 'magit-display-buffer-fullcolumn-most-v1))
@@ -381,9 +389,9 @@ Version 2017-09-22"
 
 ;; (add-hook 'find-file-hook 'gitsafe-after-find-file)
 
-;;; gitsafe-save-all
+;;; gitsafe/magit-stage-all
 ;;;###autoload
-(defun gitsafe-save-all ()
+(defun gitsafe/magit-stage-all ()
   "遍历 buffer 列表,发现有没有没暂存的,.有的话就就弹出来
 这个不紧能对当前的 buffer,还能对 buffer 列表有用."
   (interactive)
@@ -399,9 +407,207 @@ Version 2017-09-22"
 	(progn
 	  (set-buffer (pop gitsafe-buffer-unstaged-list))
 	  (gitsafe-magit-stage-command))
-      (message "staged all"))))
+      (message "staged all")
+      ;; 如果都暂存了,就对当前文件执行,就是显示 magit-diff 窗口,然后可以继续执行提交等
+      (magit-diff-unstaged nil (list (magit-file-relative-name))))))
+
+;;; gitsafe/magit-stage-current-buffer
+
+;;;###autoload
+(defun gitsafe/magit-stage-current-buffer ()
+  "magit stage 当前文件,处理未跟踪的情况,和窗口打开后的情况"
+  (interactive)
+  ;; 先保存文件
+  (gitsafe-save-buffer)
+  ;; 保存当前 buffer 对象到
+  (setq gitsafe-commit-buffer-file-buffer (current-buffer))
+  ;; 处理未跟踪的情况
+  (unless (magit-file-tracked-p (buffer-file-name (current-buffer)))
+    (when (y-or-n-p "this file not track by magit ,[y]track this file")
+      (magit-stage-file (magit-current-file))
+      (message "magit tracks current file")))
+  ;; 当文件存在 modified 的时候
+  (when (gitsafe-buffer-anything-modified-p)
+    (magit-diff-unstaged nil (list (magit-file-relative-name)))
+    (goto-char (point-min))
+    (magit-section-show-level-3-all)
+    (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2))))
+
+;;; gitsafe/magit-commit-current-buffer
+(defun gitsafe/magit-commit-buffer (buffer &optional amend)
+  "提交当前 buffer"
+  (let ((args (list "--only" (buffer-file-name buffer)))
+	amend)
+    (if amend
+	(magit-commit-amend args)
+      (magit-commit-create args))))
+
+;; (defun gitsafe/magit-commit-current-buffer (&optional amend)
+;;   (interactive)
+;;   (gitsafe/magit-commit-buffer (current-buffer) amend))
+
+;;;###autoload
+(defun gitsafe/magit-diff-buffer-file ()
+  "调整 magit-diff-buffer-file 的默认行为."
+  (interactive)
+  (magit-diff-buffer-file)
+  (run-with-idle-timer
+   0.01 nil (lambda ()
+	      (magit-section-show-level-2-all)
+	      (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2))
+	      (goto-char (point-min))
+	      ))
+  ;; (my-toggle-current-window-dedication)
+  )
+
+;; 不管暂存区的其他文件,只把暂存区内当前文件,commit.
+;; (magit-commit-at-point)
+;; (magit-commit-create (list (format "--only %s" (buffer-file-name (current-buffer)))))
+;; 传的参数要是个列表,就是一个一个的.不能混成一个
+;; (magit-commit-create (list "--only" (buffer-file-name (current-buffer))))
+;; (defvar tx/magit-commit-current-file )
+;;;###autoload
+(defun gitsafe/magit-commit-current-buffer (&optional amend)
+  "提交当前文件,如果是在当前要提交的 buffer 里,直接传(current-buffer),
+如果是在显示当前文件 unstaged 的 magit-pop 里,则利用 window-parameter 参数里储存的之前所谓当前文件的窗口信息,来提供 buffer 对象
+amend 为t 则执行 commit-amend"
+  (interactive)
+  (if (string-prefix-p "magit-diff" (buffer-name (current-buffer)))
+      ;; 如果当前的窗口,是 magit-diff 窗口,就 commit  magit-diff 升起的那个窗口的文件
+      (let* ((buffer gitsafe-commit-buffer-file-buffer)
+	     ;; (window-buffer (car (last (window-parameter (selected-window) 'quit-restore) 2))))
+	     (args (list "--only" (buffer-file-name buffer))))
+	;; (setq gitsafe-magit-current-buffer buffer)
+	;; 隐藏 magit-diff buffer.
+	(magit-mode-bury-buffer)
+	;; 提交时候升起的 diff 窗口,改成当前文件.
+	(remove-hook 'server-switch-hook 'magit-commit-diff)
+	(add-hook 'server-switch-hook 'gitsafe/magit-commit-buffer-file-diff)
+	(if amend
+	    (magit-commit-amend args)
+	  (magit-commit-create args)))
+    (let ((magit-commit-show-diff t))
+      (remove-hook 'server-switch-hook 'gitsafe/magit-commit-buffer-file-diff)
+      (add-hook 'server-switch-hook 'magit-commit-diff)
+      (if amend
+	  (gitsafe/magit-commit-buffer (current-buffer) t)
+	(gitsafe/magit-commit-buffer (current-buffer))))))
+
+(add-hook 'with-editor-post-finish-hook
+          (lambda ()
+            (add-hook 'server-switch-hook 'magit-commit-diff)
+            (remove-hook 'server-switch-hook 'gitsafe/magit-commit-buffer-file-diff)))
+
+(add-hook 'with-editor-post-cancel-hook
+          (lambda ()
+            (add-hook 'server-switch-hook 'magit-commit-diff)
+            (remove-hook 'server-switch-hook 'gitsafe/magit-commit-buffer-file-diff)))
+
+;;;###autoload
+(defun gitsafe/magit-amend-commit-current-buffer ()
+  "对当前文件的提交 amend 到之前的 commit"
+  (interactive)
+  (gitsafe/magit-commit-current-buffer t)
+  )
+
+(defun gitsafe/magit-commit-buffer-file-diff (&optional buffer)
+  "magit-commit-diff 是用来控制 commit 时升起的 diff 窗口的,"
+  (let* ((buffer (or buffer gitsafe-commit-buffer-file-buffer)))
+    (when (and git-commit-mode magit-commit-show-diff)
+      (when-let ((diff-buffer (gitsafe/magit-diff-buffer-file-get-buffer buffer)))
+      ;; This window just started displaying the commit message
+      ;; buffer.  Without this that buffer would immediately be
+      ;; replaced with the diff buffer.  See #2632.
+      (unrecord-window-buffer nil diff-buffer))
+    (condition-case nil
+        (let ((args (car (magit-diff-arguments)))
+              (magit-inhibit-save-previous-winconf 'unset)
+              ;; (magit-display-buffer-noselect t)
+              (magit-display-buffer-noselect t)
+              (inhibit-quit nil))
+          (message "Diffing changes to be committed (C-g to abort diffing)")
+          ;; (cl-case last-command
+            ;; (magit-commit
+             ;; (magit-diff-staged nil args)
+             (with-current-buffer buffer
+               (magit-diff-buffer-file))
+             ;; )
+            ;; (magit-commit-all
+            ;;  (magit-diff-working-tree nil args))
+            ;; ((magit-commit-amend
+            ;;   magit-commit-reword
+            ;;   magit-rebase-reword-commit)
+            ;;  (magit-diff-while-amending args))
+            ;; (t (if (magit-anything-staged-p)
+            ;;        (magit-diff-staged nil args)
+             ;;      (magit-diff-while-amending args))))
+             )
+      (setq gitsafe-commit-buffer-file-buffer nil)
+      (quit)))))
+
+(defun gitsafe/magit-diff-buffer-file-get-buffer (&optional buffer)
+  "获取当前 buffer 对应的 magit-diff-buffer"
+  (let* ((buffer (or buffer (current-buffer)))
+         (file (buffer-file-name buffer))
+         (name (magit-file-relative-name file))
+         (mode "magit-diff-mode"))
+    (--each (buffer-list)
+      (with-current-buffer it
+        (when (and (string= major-mode mode)
+                   (string-match-p
+                    (if (stringp name) name)
+                    (buffer-name)))
+          (message (buffer-name it))
+          it
+          )))))
+
+(defun gitsafe/magit-diff-buffer-file-switch-buffer ()
+  "切换到与当前 buffer 对应的 magit-diff-buffer"
+  (let* ((buffer (current-buffer))
+         (file (buffer-file-name buffer))
+         (name (magit-file-relative-name file))
+         )
+    (--each (buffer-list)
+      (with-current-buffer it
+        (when (and (string= major-mode "magit-diff-mode")
+                   (string-match-p
+                    (if (stringp name) name "")
+                    (buffer-name)))
+          (switch-to-buffer it)
+          )))))
+
+;;;###autoload
+(defun gitsafe/magit-commit-current-buffer-fullscreen ()
+  (interactive)
+  (toggle-frame-fullscreen)
+  (gitsafe/magit-commit-current-buffer))
+
+(add-hook 'with-editor-post-finish-hook
+	  (lambda ()
+	    (when (frame-parameter nil 'fullscreen)
+	      (set-frame-parameter nil 'fullscreen nil))))
+
+(add-hook 'with-editor-post-cancel-hook
+	  (lambda ()
+	    (when (frame-parameter nil 'fullscreen)
+	      (set-frame-parameter nil 'fullscreen nil))))
+
+;;; gitsafe/magit-stage-current-then-all
+;;;###autoload
+(defun gitsafe/magit-stage-current-then-all ()
+  "先尝试暂存当前 buffer,如果全部暂存了,就 buffer 列表逐一查看还没暂存的."
+  (interactive)
+  (gitsafe-save-buffer)
+  (if (not (magit-file-tracked-p (buffer-file-name)))
+      (when (y-or-n-p "this file not track by magit ,[y]track this file")
+	(magit-stage-file (magit-current-file))
+	(message "magit tracks current file"))
+    (if (magit-anything-unstaged-p nil (buffer-file-name))
+	(gitsafe/magit-stage-current-buffer)
+      (gitsafe/magit-stage-all))))
 
 ;;; gitsafe-kill-emacs
+;;;###autoload
 (defun gitsafe-kill-emacs (old-func &rest args)
   "遍历 buffer 列表,发现有没有没暂存的,没有就问是否要真的退出 emacs.有的话就就弹出来"
   (let (gitsafe-buffer-unstaged-list)
