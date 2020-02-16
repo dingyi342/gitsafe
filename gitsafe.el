@@ -83,6 +83,11 @@ When a buffer-file-name matches any of the regexps it is ignored."
 ;;; gitsafe-auto-save-command
 
 ;;;; buffer 判断,是否执行自动保存
+(defvar gitsafe-auto-save-only-work-on-current-buffer t
+  "只对当前 buffer auto-save")
+
+(defvar gitsafe-auto-save-silent t
+  "是否显示保存信息")
 
 (defvar gitsafe-auto-save-predicators-list '()
   "gitsafe auto-save predicators")
@@ -131,7 +136,7 @@ If the buffer is read not only or not associated with a file, and the file is
 
 ;;;; 保存命令
 
-(defun gitsafe-auto-save--command (&optional force-save-p)
+(defun gitsafe-auto-save-all-command (&optional force-save-p)
   "Auto save buffers
 
 If FORCE-SAVE-P is non-nil, force save all possible buffers. Otherwise filting
@@ -164,11 +169,24 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
                      (mapconcat 'identity gitsafe-auto-save-buffer-list ", ")))))
         )))
 
+(defun gitsafe-auto-save-current-command ()
+  "只保存当前 buffer "
+  (when (not (memq nil (mapcar #'funcall gitsafe-auto-save-predicators-list)))
+        (if gitsafe-auto-save-silent
+            ;; `inhibit-message' can shut up Emacs, but we want
+            ;; it doesn't clean up echo area during saving
+            (with-temp-message ""
+              (let ((inhibit-message t))
+                (basic-save-buffer)))
+          (basic-save-buffer))))
+
 (defun gitsafe-auto-save-command ()
   ;; (interactive)
   ;; 删除了一个文件老是告诉我 run-idle 错误,那个文件不存在.
   ;; 因为删除了文件,那个 buffer 没删除.
-  (gitsafe-auto-save--command))
+  (if gitsafe-auto-save-only-work-on-current-buffer
+      (gitsafe-auto-save-current-command)
+    (gitsafe-auto-save-all-command)))
 
 ;;; idle 自动保存
 
@@ -613,18 +631,18 @@ amend 为t 则执行 commit-amend"
   (let (gitsafe-buffer-unstaged-list)
     (save-excursion
       (dolist (buf (buffer-list))
-	(set-buffer buf)
-	(when (and (gitsafe-buffer-useful-p)
-		   (gitsafe-git-track-p)
-		   (gitsafe-buffer-anything-unstaged-p))
-	  (cl-pushnew buf gitsafe-buffer-unstaged-list))))
+        (set-buffer buf)
+        (when (and (gitsafe-buffer-useful-p)
+                   (gitsafe-git-track-p)
+                   (gitsafe-buffer-anything-unstaged-p))
+          (cl-pushnew buf gitsafe-buffer-unstaged-list))))
     (if gitsafe-buffer-unstaged-list
-	(let ((buf (pop gitsafe-buffer-unstaged-list)))
-	  (if (eq (current-buffer) buf)
-	    (gitsafe-magit-stage-command)
-	    (switch-to-buffer buf)))
-      (when (y-or-n-p "really quit emacs:")
-	(apply old-func args)))))
+        (let ((buf (pop gitsafe-buffer-unstaged-list)))
+          (if (eq (current-buffer) buf)
+              (gitsafe-magit-stage-command)
+            (switch-to-buffer buf)))
+      (message "stage-all")
+      (apply old-func args))))
 
 ;; (nmap :keymaps 'override "M-s" 'gitsafe-save-all)
 ;; (advice-add 'kill-emacs :around 'gitsafe-kill-emacs)
@@ -632,27 +650,31 @@ amend 为t 则执行 commit-amend"
 ;; (advice-add 'save-buffers-kill-terminal :around 'gitsafe-kill-emacs)
 
 ;;; gitsafe-switch-buffer-functions
-(defun gitsafe-switch-buffer-functions (prev curr)
-  (cl-assert (eq curr (current-buffer)))  ;; Always t
-  (with-current-buffer prev
-    (when (and (gitsafe-buffer-useful-p)
-	       ;; (gitsafe-git-track-p)
-	       )
-      (with-current-buffer curr
-        (when (and (gitsafe-buffer-useful-p)
-		   (gitsafe-git-track-p))
-          (gitsafe-magit-stage-command))))))
-
 ;; 实际上是对 window-buffer-change-functioin 的一个扩展.
 ;; 传入 prev-buffer 和 cur-buffer,更好的判断.
 ;; (add-hook 'switch-buffer-functions 'gitsafe-switch-buffer-functions)
+(defvar gitsafe-switch-buffer--last nil)
+(defun gitsafe-switch-buffer-function (&rest _)
+  (unless (eq (current-buffer) gitsafe-switch-buffer--last)
+    (let ((curr (current-buffer))
+          (prev gitsafe-switch-buffer--last))
+      (setq gitsafe-switch-buffer--last curr)
+      (with-current-buffer prev
+        (when (and (gitsafe-buffer-useful-p)
+                   ;; (gitsafe-git-track-p)
+                   )
+          (with-current-buffer curr
+            (when (and (gitsafe-buffer-useful-p)
+                       (gitsafe-git-track-p))
+              (gitsafe-magit-stage-command))))))))
 
 ;;; gitsafe-mode
 (defun gitsafe-enable ()
   ;; 只对 git track 的文件实行自动保存.
   (gitsafe-auto-save-enable)
   ;; 只在两个都是 git track 的 buffer 切换时触发.
-  (add-hook 'switch-buffer-functions 'gitsafe-switch-buffer-functions)
+  (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
+  ;; (add-hook 'switch-buffer-functions 'gitsafe-switch-buffer-functions)
   (advice-add 'kill-emacs :around 'gitsafe-kill-emacs)
   (advice-add 'save-buffers-kill-emacs :around 'gitsafe-kill-emacs)
   (advice-add 'save-buffers-kill-terminal :around 'gitsafe-kill-emacs)
@@ -660,7 +682,7 @@ amend 为t 则执行 commit-amend"
 
 (defun gitsafe-disable ()
   (gitsafe-auto-save-disable)
-  (remove-hook 'switch-buffer-functions 'gitsafe-switch-buffer-functions)
+  (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
   (advice-remove 'kill-emacs 'gitsafe-kill-emacs)
   (advice-remove 'save-buffers-kill-emacs 'gitsafe-kill-emacs)
   (advice-remove 'save-buffers-kill-terminal 'gitsafe-kill-emacs)
