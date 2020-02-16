@@ -143,6 +143,8 @@ If FORCE-SAVE-P is non-nil, force save all possible buffers. Otherwise filting
 buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
 "
   (let ((gitsafe-auto-save-buffer-list))
+    ;; 因为如果文件不存在的话,会一直报错
+    (ignore-errors
       (save-excursion
         (dolist (buf (buffer-list))
           (set-buffer buf)
@@ -156,7 +158,7 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
                   (let ((inhibit-message t))
                     (basic-save-buffer)))
               (basic-save-buffer))
-            ))
+            )))
         ;; Tell user when auto save files.
         (unless gitsafe-auto-save-silent
           (cond
