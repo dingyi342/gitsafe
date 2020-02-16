@@ -7,7 +7,7 @@
 ;;; Code:
 (require 'magit)
 
-(defcustom gitsafe-auto-save-silent nil
+(defcustom gitsafe-auto-save-silent t
   "Nothing to dirty minibuffer if this option is non-nil."
   :type 'boolean
   :group 'gitsafe)
@@ -85,9 +85,6 @@ When a buffer-file-name matches any of the regexps it is ignored."
 ;;;; buffer 判断,是否执行自动保存
 (defvar gitsafe-auto-save-only-work-on-current-buffer t
   "只对当前 buffer auto-save")
-
-(defvar gitsafe-auto-save-silent t
-  "是否显示保存信息")
 
 (defvar gitsafe-auto-save-predicators-list '()
   "gitsafe auto-save predicators")
@@ -341,6 +338,9 @@ Version 2017-09-22"
 (defvar gitsafe-commit-buffer-file-buffer nil
   "magit stage 命令作用的 buffer")
 
+(defvar gitsafe-magit-query-untrack t
+  "询问是否要 track 当前文件")
+
 (defun gitsafe-magit-stage--command ()
   ;; 清理 buffer 并保存.
   (gitsafe-save-buffer)
@@ -348,9 +348,11 @@ Version 2017-09-22"
   (setq gitsafe-commit-buffer-file-buffer (current-buffer))
   ;; 跟踪文件
   (unless (gitsafe-git-track-p)
-         (when (y-or-n-p "this file is not tracking by magit ,[y]track this file?")
-           (magit-stage-file (magit-current-file))
-           (message "magit tracks current file")))
+    (if gitsafe-magit-query-untrack
+        (when (y-or-n-p "this file is not tracking by magit ,track this file[y/n]?")
+          (magit-stage-file (magit-current-file))
+          (message "magit tracks current file"))
+      (message "Untrack")))
   (when (gitsafe-buffer-only-uncommited-p)
     (if gitsafe-magit-display-uncommit
         (let ((magit-display-buffer-function 'gitsafedisplay-buffer-traditional))
@@ -360,19 +362,19 @@ Version 2017-09-22"
                                      (beginning-of-buffer)
                                      (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2))
                                      ))
-          (message "this file only have something uncommited."))
-      (message "this file only have something uncommited.")))
+          (message  "Uncommited"))
+      (message "Uncommited")))
   (when (gitsafe-buffer-anything-unstaged-p)
     (if gitsafe-magit-display-unstaged
         (progn
           (magit-diff-unstaged nil (list (magit-file-relative-name)))
           (magit-section-show-level-3-all)
-	  (goto-char (point-min))
+          (goto-char (point-min))
           (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2))
-          (message "this file have something unstaged and uncommited"))
-      (message "this file have something unstaged and uncommited")))
+          (message "Unstaged and uncommited"))
+      (message "Unstaged and uncommited")))
   (unless (gitsafe-buffer-anything-modified-p)
-         (message "this file commit completely.")))
+    (message "this file commit completely.")))
 
 ;;;###autoload
 (defun gitsafe-magit-stage-command ()
@@ -652,11 +654,13 @@ amend 为t 则执行 commit-amend"
 ;; (advice-add 'save-buffers-kill-terminal :around 'gitsafe-kill-emacs)
 
 ;;; gitsafe-switch-buffer-functions
-;; 实际上是对 window-buffer-change-functioin 的一个扩展.
+;; 实际上是对 window-buffer-change-function 的一个扩展.
 ;; 传入 prev-buffer 和 cur-buffer,更好的判断.
 ;; (add-hook 'switch-buffer-functions 'gitsafe-switch-buffer-functions)
 (defvar gitsafe-switch-buffer--last nil)
-(defun gitsafe-switch-buffer-function (&rest _)
+(defun gitsafe-switch-buffer-display-stage (&rest _)
+  "add-hook 到 window-buffer-change-function, 不用传入的 frame 参数,而是用上一个和当前 buffer 两个参数.
+也起到保存了作用."
   (unless (eq (current-buffer) gitsafe-switch-buffer--last)
     (let ((curr (current-buffer))
           (prev gitsafe-switch-buffer--last))
@@ -668,15 +672,27 @@ amend 为t 则执行 commit-amend"
           (with-current-buffer curr
             (when (and (gitsafe-buffer-useful-p)
                        (gitsafe-git-track-p))
-              (gitsafe-magit-stage-command))))))))
+                (gitsafe-magit-stage-command))))))))
+;; 现在是弹出来 buffer 显示 stage 情况
+;; 还可以不弹窗口,只显示 message
+;; 还可以调用系统级的提示,比如用 hs.alert
+;; 还可以和其他插件联动,比如 modeling,显示为红色,或者 tabbar 显示为红色来达到提示的效果.
+;; 确实,弹出窗口太明显了.
 
+;; 如果这是 message 的话,就可以不 prevbuffer 的限制放宽了.
+;; 或者就不需要传入 prev buffer 的参数了.
+(defun gitsafe-switch-buffer-display-message (&rest _)
+  (let ((gitsafe-magit-display-unstaged nil)
+        (gitsafe-magit-query-untrack nil))
+    (when (and (gitsafe-buffer-useful-p))
+      (gitsafe-magit-stage--command))))
 ;;; gitsafe-mode
 (defun gitsafe-enable ()
   ;; 只对 git track 的文件实行自动保存.
   (gitsafe-auto-save-enable)
   ;; 只在两个都是 git track 的 buffer 切换时触发.
-  (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
-  ;; (add-hook 'switch-buffer-functions 'gitsafe-switch-buffer-functions)
+  ;; (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
+  (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
   (advice-add 'kill-emacs :around 'gitsafe-kill-emacs)
   (advice-add 'save-buffers-kill-emacs :around 'gitsafe-kill-emacs)
   (advice-add 'save-buffers-kill-terminal :around 'gitsafe-kill-emacs)
@@ -684,7 +700,8 @@ amend 为t 则执行 commit-amend"
 
 (defun gitsafe-disable ()
   (gitsafe-auto-save-disable)
-  (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
+  ;; (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
+  (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
   (advice-remove 'kill-emacs 'gitsafe-kill-emacs)
   (advice-remove 'save-buffers-kill-emacs 'gitsafe-kill-emacs)
   (advice-remove 'save-buffers-kill-terminal 'gitsafe-kill-emacs)
