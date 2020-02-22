@@ -206,11 +206,14 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
 
 (defun gitsafe-auto-save-enable ()
   (gitsafe-auto-save-initialize-idle-timer)
-  (add-hook 'before-save-hook 'font-lock-flush))
+  ;; 这个会导致在有js的org-mode里保存的时候,把搜狗输入法切换..
+  ;; (add-hook 'before-save-hook 'font-lock-flush)
+  )
 
 (defun gitsafe-auto-save-disable ()
   (gitsafe-auto-save-stop-idle-timer)
-  (remove-hook 'before-save-hook 'font-lock-flush))
+  ;; (remove-hook 'before-save-hook 'font-lock-flush)
+  )
 
 ;;; gitsafe 判断函数
 
@@ -239,6 +242,7 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
 
 (defun gitsafe-git-track-p ()
   "当前文件在一个 git repo 并且被 track"
+  ;; (vc-git-registered (buffer-file-name))
    ;; (when (gitsafe-git-repo-p)
     (magit-file-tracked-p (buffer-file-name (current-buffer))))
 
@@ -276,6 +280,10 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
   "判断当前是否安全."
   (and (gitsafe-buffer-useful-p)
        (not (gitsafe-buffer-unsafe-p))))
+
+(defvar gitsafe-my-git-repo '("~/.emacs.d/"))
+(defun gitsafe-my-git-repo-p ()
+  (member (magit-toplevel default-directory) gitsafe-my-git-repo))
 
 ;;; gitsafe-cleanup-buffer
 (defun gitsafe-cleanup-buffer ()
@@ -325,7 +333,8 @@ Version 2017-09-22"
 ;;; gitsafe-save-buffer
 (defun gitsafe-save-buffer ()
   (let ((inhibit-message t))
-    (gitsafe-cleanup-buffer))
+    (when (gitsafe-my-git-repo-p)
+      (gitsafe-cleanup-buffer)))
   (save-buffer))
 
 ;;; gitsafe-magit-stage-command
@@ -400,6 +409,24 @@ Version 2017-09-22"
       (if (equal '(4) arg)
           (kill-buffer)
         (kill-buffer-and-window)))))
+
+(defun gitsafe-kill-buffer-hook ()
+  (if (gitsafe-buffer-anything-unstaged-p)
+        (gitsafe-magit-stage-command)))
+
+;; (add-hook 'kill-buffer-query-functions 'gitsafe-kill-buffer-query-functions)
+;; (setq kill-buffer-query-functions nil)
+
+;; 这会导致每次保存 buffer 前都会触发,不懂...
+;; (advice-add 'kill-buffer :around (lambda (old-func &rest args)
+;;                                    (if (gitsafe-buffer-anything-unstaged-p)
+;;                                        (gitsafe-magit-stage-command)
+;;                                      (apply old-func args))))
+;; (advice-remove 'kill-buffer (lambda (old-func &rest args)
+;;                                    (if (gitsafe-buffer-anything-unstaged-p)
+;;                                        (gitsafe-magit-stage-command)
+;;                                      (apply old-func args))))
+
 ;; 绑定到 M-k
 ;;; gitsafe-after-find-file
 (defun gitsafe-after-find-file ()
@@ -681,6 +708,7 @@ amend 为t 则执行 commit-amend"
 
 ;; 如果这是 message 的话,就可以不 prevbuffer 的限制放宽了.
 ;; 或者就不需要传入 prev buffer 的参数了.
+;; 导致切换 buffer 有点卡顿.应该还是 magit 判断函数的性能导致的.
 (defun gitsafe-switch-buffer-display-message (&rest _)
   (let ((gitsafe-magit-display-unstaged nil)
         (gitsafe-magit-query-untrack nil))
@@ -691,8 +719,10 @@ amend 为t 则执行 commit-amend"
   ;; 只对 git track 的文件实行自动保存.
   (gitsafe-auto-save-enable)
   ;; 只在两个都是 git track 的 buffer 切换时触发.
+  ;; 性能不好.
   ;; (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
-  (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
+  ;; (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
+  (add-hook 'kill-buffer-hook 'gitsafe-kill-buffer-hook)
   (advice-add 'kill-emacs :around 'gitsafe-kill-emacs)
   (advice-add 'save-buffers-kill-emacs :around 'gitsafe-kill-emacs)
   (advice-add 'save-buffers-kill-terminal :around 'gitsafe-kill-emacs)
@@ -700,8 +730,10 @@ amend 为t 则执行 commit-amend"
 
 (defun gitsafe-disable ()
   (gitsafe-auto-save-disable)
+  ;; 性能不好
   ;; (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
-  (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
+  ;; (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
+  (remove-hook 'kill-buffer-hook 'gitsafe-kill-buffer-hook)
   (advice-remove 'kill-emacs 'gitsafe-kill-emacs)
   (advice-remove 'save-buffers-kill-emacs 'gitsafe-kill-emacs)
   (advice-remove 'save-buffers-kill-terminal 'gitsafe-kill-emacs)
