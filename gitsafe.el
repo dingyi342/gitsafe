@@ -81,7 +81,6 @@ When a buffer-file-name matches any of the regexps it is ignored."
     keepit))
 
 ;;; gitsafe-auto-save-command
-
 ;;;; buffer 判断,是否执行自动保存
 (defvar gitsafe-auto-save-only-work-on-current-buffer t
   "只对当前 buffer auto-save")
@@ -132,7 +131,6 @@ If the buffer is read not only or not associated with a file, and the file is
 (add-to-list 'gitsafe-auto-save-predicators-list 'gitsafe-auto-save-only-include-git-track-file)
 
 ;;;; 保存命令
-
 (defun gitsafe-auto-save-all-command (&optional force-save-p)
   "Auto save buffers
 
@@ -188,7 +186,7 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
     (gitsafe-auto-save-all-command)))
 
 ;;; idle 自动保存
-
+;;;; gitsafe-auto-save
 (defvar gitsafe-auto-save-idle-timer nil)
 ;; (setq gitsafe-auto-save-idle-timer nil)
 
@@ -214,6 +212,30 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
   (gitsafe-auto-save-stop-idle-timer)
   ;; (remove-hook 'before-save-hook 'font-lock-flush)
   )
+
+;;;; gitsafe-auto-save-all
+
+(defvar gitsafe-auto-save-all-idle-timer nil)
+(defvar gitsafe-auto-save-all-when-idle t)
+(defvar gitsafe-auto-save-all-idle-duration 30)
+
+(defun gitsafe-auto-save-all-initialize-idle-timer ()
+  "Initialize gitsafe idle timer if `gitsafe-auto-save-all-when-idle' is true."
+  (setq gitsafe-auto-save-all-idle-timer
+        (when gitsafe-auto-save-all-when-idle
+          (run-with-idle-timer gitsafe-auto-save-all-idle-duration t #'gitsafe-auto-save-all-command))))
+
+(defun gitsafe-auto-save-all-stop-idle-timer ()
+  "Stop gitsafe idle timer if `gitsafe-auto-save-all-idle-timer' is set."
+  (when gitsafe-auto-save-all-idle-timer
+    (cancel-timer gitsafe-auto-save-all-idle-timer)
+    (cancel-function-timers 'gitsafe-auto-save-all-command)))
+
+(defun gitsafe-auto-save-all-enable ()
+  (gitsafe-auto-save-all-initialize-idle-timer))
+
+(defun gitsafe-auto-save-all-disable ()
+  (gitsafe-auto-save-all-stop-idle-timer))
 
 ;;; gitsafe 判断函数
 
@@ -293,6 +315,7 @@ Works on whole buffer or text selection, respects `narrow-to-region'.
 
 URL `http://ergoemacs.org/emacs/elisp_compact_empty_lines.html'
 Version 2017-09-22"
+  (interactive)
   (let ($begin $end)
     (if (region-active-p)
         (setq $begin (region-beginning) $end (region-end))
@@ -718,6 +741,7 @@ amend 为t 则执行 commit-amend"
 (defun gitsafe-enable ()
   ;; 只对 git track 的文件实行自动保存.
   (gitsafe-auto-save-enable)
+  (gitsafe-auto-save-all-enable)
   ;; 只在两个都是 git track 的 buffer 切换时触发.
   ;; 性能不好.
   ;; (add-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
@@ -730,6 +754,7 @@ amend 为t 则执行 commit-amend"
 
 (defun gitsafe-disable ()
   (gitsafe-auto-save-disable)
+  (gitsafe-auto-save-all-disable)
   ;; 性能不好
   ;; (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-function)
   ;; (remove-hook 'window-buffer-change-functions 'gitsafe-switch-buffer-display-message)
