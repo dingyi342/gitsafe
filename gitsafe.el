@@ -387,10 +387,10 @@ Version 2017-09-22"
       (message "Untrack")))
   (when (gitsafe-buffer-only-uncommited-p)
     (if gitsafe-magit-display-uncommit
-        (let ((magit-display-buffer-function 'gitsafedisplay-buffer-traditional))
+        (let ((magit-display-buffer-function 'magit-display-buffer-traditional))
           (magit-diff-buffer-file)
           (run-with-timer 0.5 nil '(lambda ()
-                                     (gitsafesection-show-level-2-all)
+                                     (magit-section-show-level-2-all)
                                      (beginning-of-buffer)
                                      (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2))
                                      ))
@@ -430,8 +430,8 @@ Version 2017-09-22"
     (if (gitsafe-buffer-anything-unstaged-p)
         (gitsafe-magit-stage-command)
       (if (equal '(4) arg)
-          (kill-buffer)
-        (kill-buffer-and-window)))))
+          (kill-this-buffer)
+        (ignore-errors (kill-buffer-and-window))))))
 
 (defun gitsafe-kill-buffer-hook ()
   (if (gitsafe-buffer-anything-unstaged-p)
@@ -499,12 +499,13 @@ Version 2017-09-22"
       (magit-stage-file (magit-current-file))
       (message "magit tracks current file")))
   ;; 当文件存在 modified 的时候
-  (when (gitsafe-buffer-anything-modified-p)
-    (magit-diff-unstaged nil (list (magit-file-relative-name)))
-    (goto-char (point-min))
-    (magit-section-show-level-3-all)
-    (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2))))
-
+  (if (gitsafe-buffer-anything-modified-p)
+      (progn
+        (magit-diff-unstaged nil (list (magit-file-relative-name)))
+        (goto-char (point-min))
+        (magit-section-show-level-3-all)
+        (fit-window-to-buffer (selected-window) (frame-height) (/ (frame-height) 2)))
+    (message "everything safe!!!")))
 ;;; gitsafe/magit-commit-current-buffer
 (defun gitsafe/magit-commit-buffer (buffer &optional amend)
   "提交当前 buffer"
