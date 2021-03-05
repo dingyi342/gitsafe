@@ -244,9 +244,9 @@ buffers by using all predicators in `gitsafe-auto-save-predicators-list'.
   (and
    (not (minibufferp))
    (buffer-file-name)
-   (or
-    (derived-mode-p 'prog-mode)
-    (derived-mode-p 'text-mode))
+   ;; (or
+   ;;  (derived-mode-p 'prog-mode)
+   ;;  (derived-mode-p 'text-mode))
    (buffer-live-p (current-buffer))
    (file-writable-p (buffer-file-name))))
 
